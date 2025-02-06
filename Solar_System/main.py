@@ -34,11 +34,23 @@ def clearScene():
     bpy.ops.object.select_all(action='SELECT')
     bpy.ops.object.delete()
 
+def setEndView():
+    #bpy.context.space_data.shading.type = 'RENDERED'
+
+    for a in bpy.context.screen.areas:
+        if a.type == 'VIEW_3D':
+            for s in a.spaces:
+                if s.type == 'VIEW_3D':
+                    s.clip_end = 10000
+
 def setUpScene():
     #clears the scene and sets the max frames to 1000
     clearScene()
+    setEndView()
     maxFrame = setFrames()
     return maxFrame
+
+
 
 ################################################################################## CREATE OBJECTS/ DRIVERS    ####################################################################################################
 
