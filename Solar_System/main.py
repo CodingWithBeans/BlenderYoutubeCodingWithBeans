@@ -1,4 +1,6 @@
 import bpy
+import random
+import math
 #Before you run check the max value in setFrames(): set this to your intended maximum frame (lower values will cause inner planets to move very fast)
 #sun is 30000 times smaller than other planets, all orbits are synced so neptunes lasts 1 cycle, this means pluto does not complete a single orbit.
 #sun has a bary center # pluto texture https://planet-texture-maps.fandom.com/wiki/Pluto
@@ -20,8 +22,7 @@ planets = {
     "Neptune": [4515.0, 49528, 16.1, 59800],
     "Pluto": [5906.4, 2376, 153.3, 90560],
 }
-
-
+saturn_ring_data = [7.5, 4.0, 150] # radius width, segments
 
 ###################################################################           SCENE SET UP  ###########################################################################################################
 def setFrames():
@@ -68,9 +69,8 @@ def createUVSphere(name, location, scale):
     return sphere
 
 def createcircle(name, scale):
-
-    bpy.ops.curve.primitive_bezier_circle_add(radius=scale, location=(1432.0, 0, 0))
-    curve = bpy.context.object  # The newly created bezier circle
+    bpy.ops.curve.primitive_bezier_circle_add(radius=scale, location=(0, 0, 0))
+    curve = bpy.context.object
     curve.name = name
     return curve
 
@@ -82,18 +82,14 @@ def subdivideCircle(curve, n):
     bpy.ops.object.mode_set(mode='OBJECT')
     return curve
 
-
-def createRings():
-    marble_texture = createMarbleTexture()
-    curve = createcircle("SaturnRing", 5)
-    subdivideCircle(curve, 2)
-    attach_random_icospheres_to_curve(curve, count=700, min_radius=5)  # Place 700 icospheres outside the radius of the circle
-    return curve, marble_texture
-
-def create_icosphere_at_vertex(position, parent):
-    bpy.ops.mesh.primitive_ico_sphere_add(radius=(random.uniform(0.1, 1) * 0.1), location=position)
+def create_icosphere_at_vertex(position, parent, marble_texture):
+    bpy.ops.mesh.primitive_ico_sphere_add(radius=((random.uniform(0.1, 1)) * 2), location=position)
     icosphere = bpy.context.object
     icosphere.name = "Icosphere_Vertex"
+    multiplier = random.uniform(-20, 20)
+    icosphere.location.z += multiplier
+    zDriverloc = icosphere.driver_add("location", 2)
+    zDriverloc.driver.expression = f"{multiplier} * sin(frame / 100)"
     
     # Add a displacement modifier
     displace_mod = icosphere.modifiers.new(name="MarbleDisplace", type='DISPLACE')
@@ -109,7 +105,7 @@ def create_icosphere_at_vertex(position, parent):
 
     return icosphere
 
-def attach_random_icospheres_to_curve(curve, count, min_radius=5):
+def attach_random_icospheres_to_curve(curve, marble_texture, count, min_radius=5):
     """Attach icospheres to a random subset of vertices on the curve mesh, ensuring they spawn outside the circle."""
     bpy.context.view_layer.objects.active = curve
     bpy.ops.object.convert(target='MESH')
@@ -130,17 +126,7 @@ def attach_random_icospheres_to_curve(curve, count, min_radius=5):
             # Randomly adjust the distance further away while maintaining the initial random spread
             distance_factor = random.uniform(1.1, 2.0)  # Increase distance by 10% to 200%
             new_position = vertex.co * distance_factor
-            create_icosphere_at_vertex(new_position, curve)
-
-def createMarbleTexture():
-    if "SharedMarbleTexture" not in bpy.data.textures:
-        marble_texture = bpy.data.textures.new(name="SharedMarbleTexture", type='MARBLE')
-        marble_texture.marble_type = 'SOFT'
-        marble_texture.noise_basis = 'VORONOI_F1'
-        marble_texture.turbulence = 10
-    else:
-        marble_texture = bpy.data.textures["SharedMarbleTexture"]
-    return marble_texture
+            create_icosphere_at_vertex(new_position, curve, marble_texture)
 
 def newNode(nodes, type, location=(0, 0)):
     node = nodes.new(type=type)  # Create a new node of the specified type
@@ -148,7 +134,7 @@ def newNode(nodes, type, location=(0, 0)):
     return node  # Return the created node
 
 
-def createMaterial(name, imagePath):
+def createMaterialplanets(name, imagePath):
     
     material = bpy.data.materials.new(name=name)  # Create a new material with the given name
     material.use_nodes = True  # Enable node-based shading for the material
@@ -176,6 +162,41 @@ def createMaterial(name, imagePath):
 
     return material  # Return the created material
 
+def createMaterialSaturnsRings(name):
+    material = bpy.data.materials.new(name=name)
+    material.use_nodes = True
+
+    nodes = material.node_tree.nodes  
+    links = material.node_tree.links  
+
+    for node in nodes:
+        nodes.remove(node)
+
+    output_node = newNode(nodes, "ShaderNodeOutputMaterial", (400, 0))
+    principled_bsdf = newNode(nodes, "ShaderNodeBsdfPrincipled", (0, 0))
+    transparent_bsdf = newNode(nodes, "ShaderNodeBsdfTransparent", (-300, -200))  # Transparent BSDF shader
+    mix_shader = newNode(nodes, "ShaderNodeMixShader", (200, 0))  # Mix Shader node
+
+    links.new(principled_bsdf.outputs["BSDF"], mix_shader.inputs[1])
+    links.new(mix_shader.outputs["Shader"], output_node.inputs["Surface"])
+    links.new(transparent_bsdf.outputs["BSDF"], mix_shader.inputs[2])
+
+    principled_bsdf.inputs["Roughness"].default_value = 0.032
+    principled_bsdf.inputs[18].default_value = 0.6
+    principled_bsdf.inputs["Alpha"].default_value = 0.191
+
+    return material
+
+def createMarbleTexture():
+    if "SharedMarbleTexture" not in bpy.data.textures:
+        marble_texture = bpy.data.textures.new(name="SharedMarbleTexture", type='MARBLE')
+        marble_texture.marble_type = 'SOFT'
+        marble_texture.noise_basis = 'VORONOI_F1'
+        marble_texture.turbulence = 10
+    else:
+        marble_texture = bpy.data.textures["SharedMarbleTexture"]
+    return marble_texture
+
 def addDriversLocation(obj, D, year, maxFrame):
     neptuneOrbitLim = maxFrame
     neptuneDays = 59800
@@ -194,18 +215,89 @@ def addDriversRotation(obj, hour):
     zDriver = obj.driver_add("rotation_euler", 2)
     zDriver.driver.expression = f"frame / {day}"
 
+def checklastcharacter(object_name):
+    return int(object_name[-1])
+
+def createSaturnRing(ring_material, saturn_ring_data):
+
+    #grab the data and assign from list
+    radius = saturn_ring_data[0]  # Approximate Saturn ring inner radius
+    width = saturn_ring_data[1]    # Width of the ring
+    num_instances = int(saturn_ring_data[2])  # Number of small torus objects
+
+    #making collection
+    collection_name = "SaturnsRings"
+    collection = bpy.data.collections.get(collection_name)
+
+    if not collection:
+        collection = bpy.data.collections.new(collection_name)
+        bpy.context.scene.collection.children.link(collection)
+
+    #making rings
+    for i in range(num_instances):
+        driverz = random.uniform(0, 2 * math.pi)
+        anglex = random.uniform(-0.02, 0.02)
+        distance = random.uniform(radius - width / 2, radius + width / 2) #  this randomnesss stops us naming the rings in sequential order
+        z_bump = random.uniform(-0.1, 0.1)
+
+        bpy.ops.mesh.primitive_torus_add(major_radius=distance, minor_radius = 0.02, major_segments=36, minor_segments=8)
+
+        ring = bpy.context.object
+        ring.data.materials.append(ring_material)
+
+        s = 12
+        location = 1432
+        ring.scale = (s, s, s)
+        ring.location = (location, 0, z_bump)
+        ring.name = f"RingSegment_{i}"
+
+        # Randomly rotate and tilt slightly
+        ring.rotation_euler[0] = anglex
+
+        # Add a driver for the Z rotation (ring spin)
+        z_driver = ring.driver_add("rotation_euler", 2) 
+        name = ring.name
+        namelastchara = checklastcharacter(name)
+        if namelastchara % 2 == 0:
+            driverxpression = f"({driverz} + (frame / 100)) % (2 * pi)"
+        else:
+            driverxpression = f"(({driverz} + (frame / 100)) % (2 * pi) * -1)"
+
+        # Set driver expression (this will make the ring spin)
+        z_driver.driver.expression = driverxpression  # Randomized rotation per ring
+
+        ring.data.name = f"RingSegmentMesh_{i}"
+
+
+        #unlinks from main collection and links to targetted satrurns rings collection
+        for col in ring.users_collection:
+            col.objects.unlink(ring)
+        
+        collection.objects.link(ring)
+
+        #selects saturn and parents the rings 
+        saturn = bpy.data.objects.get("Saturn")
+        saturn.select_set(True)
+        bpy.context.view_layer.objects.active = saturn
+        bpy.ops.object.parent_set(type='OBJECT')
+
+def createAsteroidBelt():
+    marble_texture = createMarbleTexture()
+    curve = createcircle("AsteroidBelt", 300)
+    zDriver = curve.driver_add("rotation_euler", 2)
+    zDriver.driver.expression = f"frame / 10000"
+    subdivideCircle(curve, 2)
+    attach_random_icospheres_to_curve(curve, marble_texture, count=700, min_radius=5)
+
+
 def createPlanets(maxFrame, planets):
     for name, (D, radius, hour, year) in planets.items():
         imagePath = f"C:\\Users\\matty\\Desktop\\BlenderAPI\\Solar_System\\Textures\\{name}.jpg"
-        planetMaterial= createMaterial(name, imagePath)
+        planetMaterial= createMaterialplanets(name, imagePath)
         
         scale_factor = 30000 if name == "Sun" else 2000
         
         planet= createUVSphere(name, ((D / 10), 0, 0), (radius / scale_factor))
-        if name == "Saturn":
-            curve, marble_texture = createRings
-        else:
-            pass
         addDriversLocation(planet, D, year, maxFrame)
         addDriversRotation(planet, hour)
         planet.data.materials.append(planetMaterial)
@@ -217,5 +309,9 @@ def main():
     maxFrame =setUpScene()
     #creates planets inc sun
     createPlanets(maxFrame, planets=planets)
+    ringmatname = "Ring Material"
+    ring_material = createMaterialSaturnsRings(ringmatname)
+    createSaturnRing(ring_material, saturn_ring_data=saturn_ring_data)
+    createAsteroidBelt()
     
 main()
